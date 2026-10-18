@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MATRIX BOOT</title>
+<!--
+  dsh-desktop 启动片头 —— 黑客帝国档(数字雨), 约 13 秒(页面先就绪会自动收尾到 ~10 秒)。
+
+  与 550c-boot.html 是两份独立资源: 那份由 scripts\make-splash.ps1 从上游原稿
+  定点改写生成, 重跑脚本会被覆盖; 这份是本项目手写的原创页面, 不进生成流程。
+  视觉全部用 canvas + CSS 现画(没有外部图片/视频/字体文件)。
+
+  视觉参考《黑客帝国动画版·虚拟程序》(Program) 片头: 满屏左右镜像的密集代码雨、
+  白色雨头、纯黑底上细衬线超宽字距的标题卡、硬切黑场。
+
+  时间轴: 开机线 → 数字雨满屏 + 终端日志逐行敲出 → 故障条 + 径向闪光
+          → ACCESS GRANTED 压满屏 → 硬切黑场 → 片尾标题卡 DEEPSEEK HARNESS
+          → 逐字飘散模糊消失 → 淡出交接。
+
+  与宿主的契约(与 550c-boot.html 一致):
+    网页 → 宿主  {t:"ready"} 文档就绪, 可以下播放指令
+                {t:"done"}  已淡到片头底色, 宿主该收起遮罩
+    宿主 → 网页  window.dsh550c.play("matrix") / skip() / note(text) / hurry()
+
+  调试(用浏览器直接打开时可用): ?speed=2 倍速播放; ?speed=0.5 慢放。
+
+  实现要点:
+  - 时间轴按 performance.now() 的真实时间推进(until/waitOr), 窗口被遮挡、系统休眠
+    唤醒后定时器被节流也不会把整段拉长, 到点直接进入下一阶段。
+  - 数字雨分远近两层(远层小字暗、慢; 近层大字亮、快), 加上偶发的"整列爆亮"和
+    15 秒 1.045 倍的镜头缓推, 避免平面 wallpaper 感。
+  - 观感层不加整屏 mix-blend-mode(will be 合成器每帧多做一次全屏混合), 荧光用普通
+    半透明径向渐变近似; 闪光也改成以文字为中心的径向亮斑, 不再整屏铺白。
+  - prefers-reduced-motion: reduce 时关掉数字雨/闪光/飘散, 只保留文字与淡入淡出。
+-->
+<style>
+  :root{
+    --bg:#050403;                 /* 与 SplashHost.BootBackground 一致, 交接时不闪色 */
+    --green:#00ff66;
+    --green-bright:#d8ffe4;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{
+    width:100%;height:100%;overflow:hidden;background:var(--bg);
+    cursor:default;user-select:none;-webkit-user-select:none;
+  }
+  body{
+    font-family:Consolas,"Cascadia Mono","MS Gothic","Courier New",monospace;
+    color:var(--green);
+  }
+
+  /* ---------- 数字雨 + 镜头缓推 ---------- */
+  #rainWrap{
+    position:fixed;inset:0;z-index:1;opacity:0;transform-origin:50% 46%;
+    transition:opacity 1s ease;
+    animation:drift 15s ease-out forwards;
+  }
+  body.dsh-rain #rainWrap{opacity:1;}
+  @keyframes drift{from{transform:scale(1)}to{transform:scale(1.045)}}
+  #rain{
+    display:block;width:100%;height:100%;
+    transition:transform .07s linear,filter .07s linear;
+  }
+  #rain.jit{transform:translateX(4px) skewX(-1.1deg);filter:brightness(1.3);}
+
+  /* 硬切黑场: 数字雨/日志/状态行瞬间收掉, 只留黑底上的标题卡 */
+  body.dsh-cut #rainWrap,body.dsh-cut #glow,body.dsh-cut #scan,body.dsh-cut #vignette,
+  body.dsh-cut #sweep,body.dsh-cut #stage,body.dsh-cut #status,body.dsh-cut #enter{
+    opacity:0!important;transition:none!important;animation:none!important;
+  }
+
+  /* ---------- 屏幕质感层: 暗角 / 扫描线 / 荧光 / 扫掠光带 ---------- */
+  #vignette{
+    position:fixed;inset:0;z-index:2;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 45%,
+      rgba(5,4,3,0) 34%,rgba(5,4,3,.55) 76%,rgba(5,4,3,.94) 100%);
+  }
+  #scan{
+    position:fixed;inset:0;z-index:3;pointer-events:none;opacity:.38;
+    background:repeating-linear-gradient(to bottom,
+      rgba(0,255,102,.05) 0 1px,rgba(0,0,0,0) 1px 3px);
+  }
+  /* 荧光: 用普通半透明径向渐变近似 screen 混合, 省掉整屏混合通道 */
+  #glow{
+    position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;
+    background:radial-gradient(ellipse at 50% 44%,
+      rgba(0,255,120,.09) 0%,rgba(0,255,120,.05) 38%,rgba(0,0,0,0) 68%);
+  }
+  #sweep{
+    position:fixed;left:0;right:0;top:0;height:150px;z-index:5;pointer-events:none;opacity:0;
+    background:linear-gradient(to bottom,
+      rgba(0,255,102,0),rgba(0,255,102,.07),rgba(0,255,102,0));
+    animation:sweep 7s linear 1.2s infinite;
+  }
+  @keyframes sweep{
+    0%{transform:translateY(-160px);opacity:0}
+    12%{opacity:.7}
+    88%{opacity:.7}
+    100%{transform:translateY(110vh);opacity:0}
+  }
+
+  /* ---------- 终端日志 ---------- */
+  #stage{
+    position:fixed;inset:0;z-index:10;display:flex;
+    align-items:center;justify-content:center;pointer-events:none;
+  }
+  #log{
+    width:min(720px,86vw);margin-top:4vh;text-align:left;
+    font-size:clamp(12px,1.12vw,16px);line-height:2;color:#5cffa4;
+    /* 数字雨从字缝里穿过, 用一圈柔和的暗色光晕把日志压出来(不出现方块底色) */
+    text-shadow:0 0 9px rgba(0,255,102,.55);
+    box-shadow:0 0 80px 46px rgba(5,4,3,.66);
+    opacity:0;transition:opacity .55s ease,transform .4s ease;
+  }
+  #log.show{opacity:1;}
+  #log.out{opacity:0;transform:translateY(-12px);}
+  #log .ln{white-space:pre;min-height:1em;}
+
+  /* ---------- 标题(参考《虚拟程序》片头: 黑底 + 细衬线 + 超宽字距 + 微弱白光) ---------- */
+  #titleBox{
+    position:fixed;left:50%;top:50%;z-index:11;text-align:center;white-space:nowrap;
+    transform:translate(-50%,-50%) translateY(12px);
+    opacity:0;transition:opacity .8s ease,transform 1.1s cubic-bezier(.2,.8,.2,1);
+    pointer-events:none;
+  }
+  #titleBox.show{opacity:1;transform:translate(-50%,-50%) translateY(0);}
+  #titleBox .rule{display:none;}          /* 参考片头没有装饰线, 只留字 */
+  #kicker{
+    margin:0 0 26px;font-size:clamp(9px,.82vw,12px);letter-spacing:.62em;
+    color:rgba(0,255,102,.42);text-transform:uppercase;
+  }
+  #title{
+    font-family:Georgia,"Times New Roman","Songti SC","SimSun",serif;
+    font-size:clamp(26px,4.2vw,62px);font-weight:400;letter-spacing:.3em;
+    color:#e6f6e8;white-space:nowrap;
+    text-shadow:0 0 3px rgba(210,255,220,.35),0 0 22px rgba(0,255,102,.28),
+                0 0 60px rgba(0,255,102,.16);
+    transition:opacity .3s ease;
+  }
+  /* 收尾: 逐字飘散 —— 每个字符一个 span, 各自带一份随机位移/旋转/模糊 */
+  #title span{
+    display:inline-block;white-space:pre;
+    transition:transform 2.3s cubic-bezier(.22,.68,.16,1),
+               opacity 2.1s ease,filter 2.3s ease;
+  }
+  #title.fly span{
+    transform:translate3d(var(--dx),var(--dy),0) rotate(var(--rot)) scale(var(--sc,1));
+    opacity:0;filter:blur(var(--bl,2px));
+  }
+  #title.glitch{animation:titleGlitch 2.6s steps(1) infinite;}
+  @keyframes titleGlitch{
+    0%,88%,100%{text-shadow:0 0 3px rgba(210,255,220,.35),0 0 22px rgba(0,255,102,.28),
+                0 0 60px rgba(0,255,102,.16);transform:none;}
+    90%{text-shadow:-5px 0 rgba(190,255,220,.55),5px 0 rgba(255,0,70,.3),0 0 18px rgba(0,255,102,.5);
+        transform:translateX(2px);}
+    93%{text-shadow:4px 0 rgba(0,255,102,.6),-4px 0 rgba(0,255,220,.4);transform:translateX(-2px);}
+    96%{text-shadow:0 0 20px rgba(0,255,102,.55);transform:translateX(1px);}
+  }
+  /* 中文副标题: 学参考片头放在标题下方很远处, 小字号、低亮度、宽字距 */
+  #sub{
+    margin-top:12vh;font-size:clamp(11px,1.02vw,14px);letter-spacing:.58em;
+    color:rgba(214,244,222,.62);opacity:0;transition:opacity 1.4s ease;
+    font-family:Consolas,"Cascadia Mono","MS Gothic",monospace;
+  }
+  #sub.show{opacity:1;}
+  /* 标题开始飘散时, 上下两行小字一起退场 */
+  #titleBox.out #kicker,#titleBox.out #sub{opacity:0!important;transition:opacity .6s ease;}
+
+  /* ---------- 底部状态行(宿主 note() 写的阶段文字落这里) ---------- */
+  #status{
+    position:fixed;left:0;right:0;bottom:26px;z-index:12;text-align:center;
+    font-size:clamp(11px,1vw,13px);letter-spacing:.22em;
+    color:rgba(0,255,102,.78);text-shadow:0 0 10px rgba(0,255,102,.45);
+    opacity:0;transition:opacity .6s ease;pointer-events:none;
+  }
+  #status.show{opacity:1;}
+  /* 宿主送来的是中文阶段提示, 原 letter-spacing 会把汉字撑得太散 */
+  #status.zh{letter-spacing:.06em;font-size:clamp(11px,1vw,14px);}
+  #status .cur{
+    display:inline-block;width:.58em;height:1em;margin-left:.5em;vertical-align:-.12em;
+    background:var(--green);box-shadow:0 0 12px rgba(0,255,102,.85);
+    animation:blink 1.05s steps(1) infinite;
+  }
+  @keyframes blink{50%{opacity:0}}
+
+  /* ---------- 高潮字幕: ACCESS GRANTED ----------
+     标题卡在片尾, 高潮时 #titleBox 整块隐藏, 所以这条可以独占 body 层 */
+  #enter{
+    position:fixed;left:0;right:0;top:50%;z-index:22;text-align:center;
+    transform:translateY(-50%) scale(1.12);white-space:nowrap;
+    font-size:clamp(20px,3.4vw,46px);letter-spacing:.62em;
+    color:#eaffef;opacity:0;
+    text-shadow:0 0 18px rgba(0,255,102,.95),0 0 64px rgba(0,255,102,.6);
+    pointer-events:none;
+    transition:opacity .3s ease,letter-spacing 1s cubic-bezier(.2,.8,.2,1),
+               transform 1s cubic-bezier(.2,.8,.2,1);
+  }
+  #enter.on{opacity:1;letter-spacing:.34em;transform:translateY(-50%) scale(1);}
+
+  /* 闪光: 以文字为中心的径向亮斑, 而不是整屏铺白(整屏白会把画面压成灰雾) */
+  #flash{
+    position:fixed;inset:0;z-index:20;pointer-events:none;opacity:0;
+    background:radial-gradient(circle at 50% 48%,
+      rgba(226,255,236,.95) 0%,rgba(150,255,190,.42) 16%,rgba(0,255,120,.12) 34%,
+      rgba(0,0,0,0) 60%);
+    mix-blend-mode:screen;
+  }
+  #flash.on{animation:flashPulse .38s ease-out forwards;}
+  @keyframes flashPulse{
+    0%{opacity:0;transform:scale(.94)}
+    18%{opacity:.9;transform:scale(1)}
+    100%{opacity:0;transform:scale(1.06)}
+  }
+
+  /* 故障转场: 横向亮条(位置/高度由脚本随机, 用完即弃)
+     注意类名不能叫 .glitch —— #title 也挂 .glitch 做闪烁, 会命中同一条规则 */
+  .glitch-bar{
+    position:fixed;left:0;right:0;z-index:15;height:2px;pointer-events:none;opacity:0;
+    background:rgba(190,255,215,.45);
+    box-shadow:0 0 14px rgba(0,255,102,.7);
+  }
+  .glitch-bar.on{animation:bar .5s steps(2) forwards;}
+  @keyframes bar{
+    0%{opacity:0;transform:translateX(0)}
+    18%{opacity:.6;transform:translateX(-16px)}
+    46%{opacity:.1;transform:translateX(11px)}
+    74%{opacity:.4;transform:translateX(-5px)}
+    100%{opacity:0;transform:translateX(0)}
+  }
+
+  /* ---------- 开机线(CRT 点亮) ---------- */
+  #powerline{
+    position:fixed;left:50%;top:50%;z-index:24;height:2px;width:0;transform:translate(-50%,-50%);
+    background:#d8ffe4;box-shadow:0 0 16px rgba(0,255,102,.9),0 0 46px rgba(0,255,102,.55);
+    pointer-events:none;opacity:0;
+  }
+  #powerline.on{animation:powerOn .95s cubic-bezier(.2,.9,.2,1) forwards;}
+  @keyframes powerOn{
+    0%{width:0;opacity:0}
+    14%{width:7%;opacity:1}
+    52%{width:100%;opacity:.92}
+    68%{width:100%;opacity:.22}
+    100%{width:100%;opacity:0}
+  }
+
+  /* ---------- 交接: 全体淡到片头底色 ---------- */
+  body.dsh-fade #rainWrap,body.dsh-fade #sweep,body.dsh-fade #glow,body.dsh-fade #scan,
+  body.dsh-fade #vignette,body.dsh-fade #stage,body.dsh-fade #titleBox,
+  body.dsh-fade #status,body.dsh-fade #enter,body.dsh-fade #flash{
+    opacity:0!important;transition:opacity .35s ease!important;animation:none!important;
+  }
+
+  /* ---------- 减少动效: 关掉雨/扫描/扫掠/镜头推近 ---------- */
+  @media (prefers-reduced-motion: reduce){
+    #rainWrap{animation:none;}
+    #sweep{display:none;}
+    #scan{opacity:.22;}
+  }
+</style>
+</head>
+<body>
+
+<div id="rainWrap"><canvas id="rain"></canvas></div>
+<div id="sweep"></div>
+<div id="glow"></div>
+<div id="scan"></div>
+<div id="vignette"></div>
+
+<div id="stage"><div id="log"></div></div>
+
+<div id="titleBox">
+  <div class="rule"></div>
+  <div id="kicker">WAKE UP // FOLLOW THE SIGNAL</div>
+  <h1 id="title">DEEPSEEK HARNESS</h1>
+  <div id="sub">// CONNECTED · 01001000 01001001</div>
+  <div class="rule"></div>
+</div>
+
+<div id="status"><span id="statusText"></span><i class="cur"></i></div>
+<div id="enter">ACCESS GRANTED</div>
+<div id="flash"></div>
+<div id="powerline"></div>
+
+<script>
+(() => {
+"use strict";
+
+const $ = s => document.querySelector(s);
+const host = (window.chrome && window.chrome.webview) ? window.chrome.webview : null;
+const post = msg => { try { if (host) host.postMessage(msg); } catch (e) {} };
+
+/* ===== 调试开关(?speed=2 倍速 / ?speed=0.5 慢放) ===== */
+const qs = new URLSearchParams(location.search);
+const SPEED = Math.min(8, Math.max(0.25, parseFloat(qs.get("speed")) || 1));
+const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ===== 可取消计时: 跳过时一次性回收, 不留孤儿定时器 ===== */
+let cancelled = false, launched = false, finished = false, hurryFlag = false;
+const timeouts = new Set(), intervals = new Set();
+
+/* 整段按"逻辑毫秒"编排, 真实等待 = 逻辑 / SPEED */
+const T0 = performance.now();
+const elapsed = () => (performance.now() - T0) * SPEED;
+
+function sleep(logicalMs){
+  return new Promise(resolve => {
+    if (cancelled) return resolve();
+    const id = setTimeout(() => { timeouts.delete(id); resolve(); },
+                          Math.max(0, logicalMs / SPEED));
+    timeouts.add(id);
+  });
+}
+function later(fn, logicalMs){
+  if (cancelled) return 0;
+  const id = setTimeout(() => { timeouts.delete(id); if (!cancelled) fn(); },
+                        Math.max(0, logicalMs / SPEED));
+  timeouts.add(id);
+  return id;
+}
+function every(fn, logicalMs){
+  const id = setInterval(fn, Math.max(8, logicalMs / SPEED));
+  intervals.add(id);
+  return id;
+}
+function stopEvery(id){ clearInterval(id); intervals.delete(id); }
+
+/* 等到某个逻辑时刻; 定时器被节流而迟到时立即返回, 不会把整段拖长 */
+async function until(logicalMs){
+  const wait = logicalMs - elapsed();
+  if (wait > 0) await sleep(wait);
+}
+/* 最多等 logicalMs, 或者条件成立就提前结束(页面就绪后的"收尾"用) */
+function waitOr(logicalMs, cond){
+  return new Promise(resolve => {
+    if (cancelled) return resolve();
+    const deadline = elapsed() + logicalMs;
+    const id = setInterval(() => {
+      if (cancelled || cond() || elapsed() >= deadline){
+        clearInterval(id);
+        intervals.delete(id);
+        resolve();
+      }
+    }, 50);
+    intervals.add(id);
+  });
+}
+
+/* ===== 数字雨(canvas, 远近两层) ===== */
+const canvas = $("#rain");
+const ctx = canvas.getContext("2d", { alpha: false });
+const BG = "#050403";
+/* 半角片假名 + 数字 + 符号: 经典 Matrix 雨点字符集 */
+const GLYPHS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789:.=+-*<>|/\\";
+const FONT = 'Consolas,"MS Gothic","Courier New",monospace';
+
+let W = 0, H = 0, dpr = 1, cols = 0, baseFont = 16, farFont = 10;
+let near = [], nearSpd = [], far = [], farSpd = [], burst = [];
+let raining = false, raf = 0, lastFrame = 0, nextBurstAt = 0;
+
+function resize(){
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = Math.max(1, Math.floor(window.innerWidth * dpr));
+  H = Math.max(1, Math.floor(window.innerHeight * dpr));
+  canvas.width = W;
+  canvas.height = H;
+
+  /* 参考片头: 字比常见"终端雨"更大更粗, 列距紧(几乎无缝), 雨柱才连成一片 */
+  baseFont = Math.max(11, Math.round(Math.min(20, window.innerWidth / 64))) * dpr;
+  farFont = Math.max(7, Math.round(baseFont * 0.62));
+  cols = Math.ceil(W / baseFont) + 1;
+
+  const rows = H / baseFont;
+  near = new Array(cols); nearSpd = new Array(cols); burst = new Array(cols).fill(-1e9);
+  far = new Array(cols); farSpd = new Array(cols);
+  for (let i = 0; i < cols; i++){
+    near[i] = Math.random() * rows * 1.2 - rows * 0.2;
+    nearSpd[i] = 0.6 + Math.random() * 1.5;
+    far[i] = Math.random() * rows * 1.2 - rows * 0.2;
+    farSpd[i] = 0.35 + Math.random() * 0.6;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* 雨头 + 上面两个字(左右镜像): 一条 3 字的亮柱, 接近参考里的粗细 */
+function glyph(ax, y, color){
+  ctx.setTransform(-1, 0, 0, 1, ax, y);
+  ctx.fillStyle = color;
+  ctx.fillText(GLYPHS[(Math.random() * GLYPHS.length) | 0], 0, 0);
+}
+
+function frame(now){
+  if (!raining) return;
+  raf = requestAnimationFrame(frame);
+
+  const dt = Math.max(0.4, Math.min(2.6, (now - lastFrame) / 16.667 || 1));
+  lastFrame = now;
+
+  /* 半透明底色反复覆盖 = 拖尾; 系数不能太小, 否则残影糊成一层绿雾 */
+  ctx.fillStyle = "rgba(5,4,3,0.09)";
+  ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = "top";
+
+  /* 远层: 小字、偏暗、慢半拍, 隔列取样并错开半格 —— 落在近层柱子的缝里才有纵深 */
+  ctx.font = farFont + "px " + FONT;
+  for (let i = 0; i < cols; i += 2){
+    const y = far[i] * baseFont;
+    const ax = i * baseFont + baseFont * 0.5 + farFont * 0.94;
+    glyph(ax, y, "rgba(0,190,80,.34)");
+    far[i] += farSpd[i] * dt;
+    if (y > H && Math.random() < 0.05) far[i] = -Math.random() * 18;
+  }
+
+  /* 近层 */
+  ctx.font = baseFont + "px " + FONT;
+
+  /* 偶发的"整列爆亮": 每 0.9~1.8 秒随机点亮 1~2 列, 亮 240ms */
+  if (now > nextBurstAt){
+    nextBurstAt = now + 900 + Math.random() * 900;
+    burst[(Math.random() * cols) | 0] = now;
+    if (Math.random() < 0.35) burst[(Math.random() * cols) | 0] = now;
+  }
+
+  for (let i = 0; i < cols; i++){
+    const x = i * baseFont;
+    const y = near[i] * baseFont;
+    const ax = x + baseFont * 0.94;
+    const hot = now - burst[i] < 240;
+
+    if (hot){
+      /* 爆亮列: 雨头往上 6 个字全部提到近白, 越往上越淡 */
+      for (let k = 0; k < 6; k++){
+        glyph(ax, y - baseFont * k, k === 0 ? "#ffffff"
+                                     : "rgba(226,255,238," + (0.6 - k * 0.09).toFixed(2) + ")");
+      }
+    } else {
+      const r = Math.random();
+      glyph(ax, y, r < 0.16 ? "#ffffff"
+                 : r < 0.42 ? "#e6fff0"
+                 : "rgba(0,255,102,.82)");
+      glyph(ax, y - baseFont, "rgba(92,255,150,.55)");
+      glyph(ax, y - baseFont * 2, "rgba(0,255,102,.32)");
+      if (Math.random() < 0.5) glyph(ax, y - baseFont * 3, "rgba(0,255,102,.18)");
+    }
+
+    near[i] += nearSpd[i] * dt;
+    if (y > H && Math.random() < 0.06) near[i] = -Math.random() * 14;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function startRain(){
+  if (raining) return;
+  if (!near.length) resize();
+  lastFrame = performance.now();
+  nextBurstAt = lastFrame + 700;
+  raining = true;
+  raf = requestAnimationFrame(frame);
+}
+
+/* 硬切黑场: 停帧 + 立刻清屏 */
+function stopRain(){
+  raining = false;
+  if (raf){ cancelAnimationFrame(raf); raf = 0; }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* ===== 文本效果 ===== */
+let phaseText = "INITIALIZING NEURAL LINK";
+let hostNote = "";
+
+function renderStatus(){
+  const el = $("#statusText");
+  if (!el) return;
+  el.textContent = hostNote || phaseText;
+  $("#status").classList.toggle("zh", hostNote.length > 0);
+}
+function setPhase(text){ phaseText = text; renderStatus(); }
+
+/* 标题乱码收敛: 从左到右逐字"锁死" */
+function scramble(el, target, duration){
+  const start = performance.now();
+  const id = every(() => {
+    const p = Math.min(1, (performance.now() - start) / (duration / SPEED));
+    const lock = Math.floor(p * target.length);
+    let out = "";
+    for (let i = 0; i < target.length; i++){
+      const c = target[i];
+      out += (i < lock || c === " ") ? c : "01ABCDEF#%&*+<>/\\|"[(Math.random() * 16) | 0];
+    }
+    el.textContent = out;
+    if (p >= 1){ el.textContent = target; stopEvery(id); }
+  }, 34);
+}
+
+/* 标题逐字飘散: 拆成字符 span, 每字随机方向/旋转/缩放/模糊, 按顺序错开开始时间,
+   于是从一头到另一头依次飞走、越飞越虚 */
+function scatterTitle(el, box){
+  if (!el) return;
+  el.classList.remove("glitch");
+  if (box) box.classList.add("out");
+
+  /* 减少动效: 不拆分、不飞, 直接淡掉 */
+  if (REDUCED){
+    el.style.transition = "opacity .8s ease";
+    el.style.opacity = "0";
+    return;
+  }
+
+  const text = el.textContent;
+  el.textContent = "";
+  const frag = document.createDocumentFragment();
+  for (const ch of text){
+    const s = document.createElement("span");
+    s.textContent = ch === " " ? "\u00a0" : ch;
+    frag.appendChild(s);
+  }
+  el.appendChild(frag);
+
+  const spans = el.querySelectorAll("span");
+  spans.forEach((s, i) => {
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    s.style.setProperty("--dx", (dir * (7 + Math.random() * 34)).toFixed(1) + "vw");
+    s.style.setProperty("--dy", (-5 - Math.random() * 30).toFixed(1) + "vh");
+    s.style.setProperty("--rot", (dir * (14 + Math.random() * 60)).toFixed(0) + "deg");
+    s.style.setProperty("--sc", (0.6 + Math.random() * 0.9).toFixed(2));
+    s.style.setProperty("--bl", (1 + Math.random() * 4).toFixed(1) + "px");
+    s.style.transitionDelay = Math.round((i * 42 + Math.random() * 90) / SPEED) + "ms";
+  });
+
+  /* 先强制一次样式/布局, 让每个 span 的初始状态真正上屏;
+     否则同一帧里再加 .fly 会因为没有"起始值"而直接瞬移(看不见飞的过程) */
+  void el.offsetWidth;
+  later(() => el.classList.add("fly"), 40);
+}
+
+/* 逐行敲字 */
+function typeLine(el, text, cps){
+  return new Promise(resolve => {
+    if (cancelled) return resolve();
+    let i = 0;
+    el.textContent = "";
+    const id = setInterval(() => {
+      if (cancelled){ clearInterval(id); intervals.delete(id); return resolve(); }
+      i++;
+      el.textContent = text.slice(0, i);
+      if (i >= text.length){ clearInterval(id); intervals.delete(id); resolve(); }
+    }, Math.max(8, Math.round(1000 / (cps * SPEED))));
+    intervals.add(id);
+  });
+}
+
+/* 故障转场: 随机横向亮条 + 画布瞬间错位 */
+function glitchBurst(count){
+  if (REDUCED) return;
+  const n = count || 6;
+  for (let i = 0; i < n; i++){
+    const bar = document.createElement("div");
+    bar.className = "glitch-bar";
+    bar.style.top = (6 + Math.random() * 86).toFixed(2) + "%";
+    bar.style.height = (1 + Math.random() * 4).toFixed(1) + "px";
+    bar.style.animationDelay = Math.round(i * 46 / SPEED) + "ms";
+    document.body.appendChild(bar);
+    requestAnimationFrame(() => bar.classList.add("on"));
+    later(() => bar.remove(), 720 + i * 60);
+  }
+  canvas.classList.add("jit");
+  later(() => canvas.classList.remove("jit"), 140);
+}
+
+/* ===== 时间轴(逻辑毫秒) ===== */
+const T = {
+  logAt: 550,          /* 日志开始敲 */
+  afterLog: 360,       /* 日志敲完 → 高潮 */
+  grantHold: 2600,     /* ACCESS GRANTED 停留 */
+  grantHoldFast: 1000, /* 页面早就绪时缩短 */
+  cutBlack: 260,       /* 黑场垫一拍, 像剪辑 */
+  scramble: 1000,      /* 标题乱码收敛 */
+  cardHold: 2200,      /* 标题卡停留 */
+  cardHoldFast: 1200,
+  scatter: 2250,       /* 飘散到基本散尽 */
+  scatterFast: 1350
+};
+
+async function playMatrix(){
+  if (launched || finished) return;
+  launched = true;
+
+  document.body.classList.add("dsh-rain");
+  if (!REDUCED) startRain();
+
+  const power = $("#powerline");
+  power.classList.add("on");
+  later(() => power.remove(), 1400);
+
+  const logEl = $("#log");
+  later(() => logEl.classList.add("show"), 240);
+  later(() => $("#status").classList.add("show"), 1100);
+
+  const lines = [
+    "> establish neural link .................. OK",
+    "> decrypt core 0x5A3F ................... OK",
+    "> inject kernel payload ................. OK",
+    "> bypass firewall / 3 layers ............ OK",
+    "> synchronize 47 nodes .................. OK"
+  ];
+
+  await until(T.logAt);
+  for (const line of lines){
+    if (cancelled) return;
+    const el = document.createElement("div");
+    el.className = "ln";
+    logEl.appendChild(el);
+    await typeLine(el, line, 55);
+    await sleep(80);
+  }
+  if (cancelled) return;
+
+  /* ===== 第一段高潮(雨中): 故障条 → 径向闪光 → ACCESS GRANTED 压满屏 ===== */
+  setPhase("DECRYPTING IDENTITY");
+  await sleep(T.afterLog);
+  if (cancelled) return;
+
+  glitchBurst(5);
+  logEl.classList.add("out");
+  if (!REDUCED) $("#flash").classList.add("on");
+  later(() => $("#enter").classList.add("on"), 180);
+  later(() => setPhase("ENTERING SYSTEM · 0101"), 520);
+  later(() => glitchBurst(3), 1200);
+
+  await waitOr(T.grantHold, () => hurryFlag);
+  if (cancelled) return;
+
+  /* ===== 硬切黑场 → 片尾标题卡 ===== */
+  document.body.classList.add("dsh-cut");
+  document.body.classList.remove("dsh-rain");
+  stopRain();
+
+  await sleep(T.cutBlack);
+  if (cancelled) return;
+
+  $("#titleBox").classList.add("show");
+  scramble($("#title"), "DEEPSEEK HARNESS", T.scramble);
+  later(() => $("#sub").classList.add("show"), 700);
+  later(() => $("#title").classList.add("glitch"), T.scramble + 600);
+
+  if (hurryFlag) await sleep(T.cardHoldFast);
+  else await waitOr(T.cardHold, () => hurryFlag);
+  if (cancelled) return;
+
+  /* ===== 收尾: 逐字飘散 / 模糊消失 ===== */
+  scatterTitle($("#title"), $("#titleBox"));
+  await sleep(hurryFlag ? T.scatterFast : T.scatter);
+  if (cancelled) return;
+
+  finish(true);
+}
+
+/* ===== 交接: 淡到片头底色 → 通知宿主收起遮罩 ===== */
+function finish(played){
+  if (finished) return;
+  finished = true;
+  cancelled = true;
+
+  timeouts.forEach(id => clearTimeout(id));
+  timeouts.clear();
+  intervals.forEach(id => clearInterval(id));
+  intervals.clear();
+
+  raining = false;
+  if (raf){ cancelAnimationFrame(raf); raf = 0; }
+
+  document.body.classList.add("dsh-fade");
+  setTimeout(() => post({ t: "done" }), played ? 420 : 240);
+}
+
+/* ===== dsh-desktop 宿主桥(与 550c-boot.html 同名同形) ===== */
+window.dsh550c = {
+  play(){ playMatrix(); },                 /* 档位已由资源决定, 这里忽略参数 */
+  skip(){ finish(false); },
+  /* 主页面已经就绪: 别让用户干等, 把剩下的停留压到最短(片尾卡与飘散照旧保留) */
+  hurry(){ if (launched && !finished) hurryFlag = true; },
+  note(text){
+    if (!text) return;
+    hostNote = text;
+    renderStatus();
+  }
+};
+
+/* 播放期间点击画面 / 按 Esc 跳过 */
+document.addEventListener("click", () => { if (launched && !finished) finish(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") finish(false); });
+window.addEventListener("resize", () => { if (raining) resize(); });
+
+renderStatus();
+
+/* 文档就绪 → 报到; 直接用浏览器打开时(没有宿主)自动播一遍, 方便单独预览 */
+requestAnimationFrame(() => {
+  post({ t: "ready" });
+  if (!host) playMatrix();
+});
+})();
+</script>
+</body>
+</html>
