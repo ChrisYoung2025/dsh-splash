@@ -152,15 +152,24 @@
                 0 0 60px rgba(0,255,72,.18);
     transition:opacity .3s ease;
   }
-  /* 收尾: 逐字飘散 —— 每个字符一个 span, 各自带一份随机位移/旋转/模糊 */
-  #title span{
-    display:inline-block;white-space:pre;
-    transition:transform 2.3s cubic-bezier(.22,.68,.16,1),
-               opacity 2.1s ease,filter 2.3s ease;
-  }
+  /* 收尾: 逐字"迎面飞过镜头" —— 放大 + 动态模糊 + 轻微向外位移, 而不是四散 */
+  #title span{ display:inline-block;white-space:pre; }
   #title.fly span{
-    transform:translate3d(var(--dx),var(--dy),0) rotate(var(--rot)) scale(var(--sc,1));
-    opacity:0;filter:blur(var(--bl,2px));
+    animation:flyAway var(--fly-dur,1.9s) cubic-bezier(.3,.55,.2,1) both;
+    animation-delay:var(--del,0ms);
+  }
+  @keyframes flyAway{
+    /* 前段保持清晰、只放大(冲过来), 后段才糊掉并淡出(擦身而过) */
+    0%{
+      transform:translate3d(0,0,0) scale(1) rotate(0deg);
+      opacity:1;filter:blur(0);
+    }
+    38%{ opacity:.98; filter:blur(.6px); }
+    72%{ opacity:.6; }
+    100%{
+      transform:translate3d(var(--dx),var(--dy),0) scale(var(--sc)) rotate(var(--rot));
+      opacity:0;filter:blur(var(--bl));
+    }
   }
   #title.glitch{animation:titleGlitch 2.6s steps(1) infinite;}
   @keyframes titleGlitch{
@@ -653,15 +662,27 @@ function scatterTitle(el, box){
   el.appendChild(frag);
 
   const spans = el.querySelectorAll("span");
+  const mid = el.offsetWidth / 2;
   spans.forEach((s, i) => {
-    const dir = Math.random() < 0.5 ? -1 : 1;
-    s.style.setProperty("--dx", (dir * (7 + Math.random() * 34)).toFixed(1) + "vw");
-    s.style.setProperty("--dy", (-5 - Math.random() * 30).toFixed(1) + "vh");
-    s.style.setProperty("--rot", (dir * (14 + Math.random() * 60)).toFixed(0) + "deg");
-    s.style.setProperty("--sc", (0.6 + Math.random() * 0.9).toFixed(2));
-    s.style.setProperty("--bl", (1 + Math.random() * 4).toFixed(1) + "px");
-    s.style.transitionDelay = Math.round((i * 42 + Math.random() * 90) / SPEED) + "ms";
+    /* 从标题中心往外的方向: 只给一点横向位移, 主要靠 scale 制造"冲过来" */
+    const cx = s.offsetLeft + s.offsetWidth / 2;
+    const nx = mid > 0 ? (cx - mid) / mid : 0;          /* -1 ~ 1 */
+    const away = Math.abs(nx);
+
+    /* 放大 = 朝观众冲过来; 位移带随机方向 = 不要挤成一团地四散开 */
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 7 + Math.random() * 20;                 /* vw/vh 量级 */
+    s.style.setProperty("--dx", (nx * 5 + Math.cos(ang) * dist).toFixed(1) + "vw");
+    s.style.setProperty("--dy", (Math.sin(ang) * dist * 0.72).toFixed(1) + "vh");
+    s.style.setProperty("--sc", (2.0 + Math.random() * 1.1).toFixed(2));
+    s.style.setProperty("--rot", ((Math.random() - 0.5) * 36).toFixed(0) + "deg");
+    s.style.setProperty("--bl", (6 + Math.random() * 7).toFixed(1) + "px");
+    /* 中间的字母先冲出来, 两侧依次跟上; 再加一点随机抖动, 避免整排同步 */
+    s.style.setProperty("--del", Math.round((away * 460 + Math.random() * 260) / SPEED) + "ms");
   });
+
+  /* 动画时长也跟着 ?speed 走 */
+  el.style.setProperty("--fly-dur", Math.round(1900 / SPEED) + "ms");
 
   /* 先强制一次样式/布局, 让每个 span 的初始状态真正上屏;
      否则同一帧里再加 .fly 会因为没有"起始值"而直接瞬移(看不见飞的过程) */
@@ -713,8 +734,8 @@ const T = {
   scramble: 1000,      /* 标题乱码收敛 */
   cardHold: 2200,      /* 标题卡停留 */
   cardHoldFast: 1200,
-  scatter: 2250,       /* 飘散到基本散尽 */
-  scatterFast: 1350
+  scatter: 2450,       /* 逐字冲出镜头, 到基本散尽 */
+  scatterFast: 1550
 };
 
 async function playMatrix(){
