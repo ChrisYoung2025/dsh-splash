@@ -57,7 +57,8 @@
     animation:drift 15s ease-out forwards;
   }
   body.dsh-rain #rainWrap{opacity:1;}
-  @keyframes drift{from{transform:scale(1)}to{transform:scale(1.045)}}
+  /* 镜头极缓推近, 配合三层视差形成"从后往前"的纵深 */
+  @keyframes drift{from{transform:scale(1)}to{transform:scale(1.07)}}
   #rain{
     display:block;width:100%;height:100%;
     transition:transform .07s linear,filter .07s linear;
@@ -346,16 +347,27 @@ function waitOr(logicalMs, cond){
   });
 }
 
-/* ===== 数字雨(canvas, 远近两层) ===== */
+/* ===== 数字雨(canvas, 远 / 中 / 近 三层) ===== */
 const canvas = $("#rain");
 const ctx = canvas.getContext("2d", { alpha: false });
 const BG = "#050403";
 /* 半角片假名 + 数字 + 符号: 经典 Matrix 雨点字符集 */
 const GLYPHS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789:.=+-*<>|/\\";
 const FONT = 'Consolas,"MS Gothic","Courier New",monospace';
+const rndGlyph = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
 
-let W = 0, H = 0, dpr = 1, cols = 0, baseFont = 16, farFont = 10;
-let near = [], nearSpd = [], far = [], farSpd = [], burst = [];
+/* 三层的"距离感": 字号 / 亮度 / 下落速度 / 拖尾长度逐层递减。
+   远层最慢最暗最小、还错开半格落在近层柱缝里 —— 近层唰唰往下走, 远层只是缓缓漂,
+   两者叠在一起才有"从后往前"的纵深。
+   速度单位是"格/帧", 60fps 下近层 ≈ 8~17 格/秒(原来 ~66 格/秒, 就是那个"太快")。 */
+const LAYER_DEFS = [
+  { scale: 0.46, alpha: 0.15, vMin: 0.024, vMax: 0.050, offset: 0.55, tails: 0, step: 2 },
+  { scale: 0.72, alpha: 0.28, vMin: 0.050, vMax: 0.100, offset: 0.28, tails: 1, step: 1 },
+  { scale: 1.00, alpha: 1.00, vMin: 0.100, vMax: 0.220, offset: 0.00, tails: 2, step: 1 }
+];
+
+let W = 0, H = 0, dpr = 1, baseFont = 16;
+let layers = [];
 let raining = false, raf = 0, lastFrame = 0, nextBurstAt = 0;
 
 function resize(){
@@ -367,28 +379,25 @@ function resize(){
 
   /* 参考片头: 字比常见"终端雨"更大更粗, 列距紧(几乎无缝), 雨柱才连成一片 */
   baseFont = Math.max(11, Math.round(Math.min(20, window.innerWidth / 64))) * dpr;
-  farFont = Math.max(7, Math.round(baseFont * 0.62));
-  cols = Math.ceil(W / baseFont) + 1;
 
-  const rows = H / baseFont;
-  near = new Array(cols); nearSpd = new Array(cols); burst = new Array(cols).fill(-1e9);
-  far = new Array(cols); farSpd = new Array(cols);
-  for (let i = 0; i < cols; i++){
-    near[i] = Math.random() * rows * 1.2 - rows * 0.2;
-    nearSpd[i] = 0.6 + Math.random() * 1.5;
-    far[i] = Math.random() * rows * 1.2 - rows * 0.2;
-    farSpd[i] = 0.35 + Math.random() * 0.6;
-  }
+  layers = LAYER_DEFS.map(def => {
+    const font = Math.max(7, Math.round(baseFont * def.scale));
+    const pitch = Math.max(6, Math.round(font * 1.12));
+    const n = Math.ceil(W / pitch) + 1;
+    const rows = H / pitch;
+    return Object.assign({}, def, {
+      font, pitch, n,
+      drop: Array.from({ length: n }, () => Math.random() * rows * 1.25 - rows * 0.25),
+      spd: Array.from({ length: n }, () => def.vMin + Math.random() * (def.vMax - def.vMin)),
+      row: new Array(n).fill(-1e9),
+      ch: new Array(n).fill("0"),
+      burst: new Array(n).fill(-1e9)
+    });
+  });
+
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
-}
-
-/* 雨头 + 上面两个字(左右镜像): 一条 3 字的亮柱, 接近参考里的粗细 */
-function glyph(ax, y, color){
-  ctx.setTransform(-1, 0, 0, 1, ax, y);
-  ctx.fillStyle = color;
-  ctx.fillText(GLYPHS[(Math.random() * GLYPHS.length) | 0], 0, 0);
 }
 
 function frame(now){
@@ -398,64 +407,78 @@ function frame(now){
   const dt = Math.max(0.4, Math.min(2.6, (now - lastFrame) / 16.667 || 1));
   lastFrame = now;
 
-  /* 半透明底色反复覆盖 = 拖尾; 系数不能太小, 否则残影糊成一层绿雾 */
-  ctx.fillStyle = "rgba(5,4,3,0.09)";
+  /* 半透明底色反复覆盖 = 拖尾。拖尾长度 ≈ 下落速度 / 衰减率, 速度降到 ~1/4 后
+     衰减也要跟着降(0.03), 否则每个字还没走出两格就被擦掉, 只剩一地散点 */
+  ctx.fillStyle = "rgba(5,4,3,0.035)";
   ctx.fillRect(0, 0, W, H);
   ctx.textBaseline = "top";
 
-  /* 远层: 小字、偏暗、慢半拍, 隔列取样并错开半格 —— 落在近层柱子的缝里才有纵深 */
-  ctx.font = farFont + "px " + FONT;
-  for (let i = 0; i < cols; i += 2){
-    const y = far[i] * baseFont;
-    const ax = i * baseFont + baseFont * 0.5 + farFont * 0.94;
-    glyph(ax, y, "rgba(0,190,80,.34)");
-    far[i] += farSpd[i] * dt;
-    if (y > H && Math.random() < 0.05) far[i] = -Math.random() * 18;
-  }
+  const near = layers[layers.length - 1];
 
-  /* 近层 */
-  ctx.font = baseFont + "px " + FONT;
-
-  /* 偶发的"整列爆亮": 每 0.9~1.8 秒随机点亮 1~2 列, 亮 240ms */
+  /* 偶发的"整列爆亮": 每 1.2~2.4 秒随机点亮 1~2 列近层, 亮 420ms */
   if (now > nextBurstAt){
-    nextBurstAt = now + 900 + Math.random() * 900;
-    burst[(Math.random() * cols) | 0] = now;
-    if (Math.random() < 0.35) burst[(Math.random() * cols) | 0] = now;
+    nextBurstAt = now + 1200 + Math.random() * 1200;
+    near.burst[(Math.random() * near.n) | 0] = now;
+    if (Math.random() < 0.3) near.burst[(Math.random() * near.n) | 0] = now;
   }
 
-  for (let i = 0; i < cols; i++){
-    const x = i * baseFont;
-    const y = near[i] * baseFont;
-    const ax = x + baseFont * 0.94;
-    const hot = now - burst[i] < 240;
+  for (let li = 0; li < layers.length; li++){
+    const L = layers[li];
+    const isNear = li === layers.length - 1;
+    /* 近层稍微再快一点, 远层几乎不动 —— 视差就来自这里 */
+    const ramp = isNear ? 1.12 : 0.92;
 
-    if (hot){
-      /* 爆亮列: 雨头往上 6 个字全部提到近白, 越往上越淡 */
-      for (let k = 0; k < 6; k++){
-        glyph(ax, y - baseFont * k, k === 0 ? "#ffffff"
-                                     : "rgba(226,255,238," + (0.6 - k * 0.09).toFixed(2) + ")");
+    ctx.font = L.font + "px " + FONT;
+    const headAlpha = isNear ? 0.96 : Math.min(0.8, L.alpha + 0.12);
+
+    for (let i = 0; i < L.n; i++){
+      /* 远层隔列取样: 更稀、更像远处的余光, 也省一半绘制 */
+      if (L.step > 1 && (i % L.step)) continue;
+      const ax = i * L.pitch + L.pitch * L.offset + L.font * 0.94;
+      const row = Math.floor(L.drop[i]);
+      const y = row * L.pitch;
+      const hot = isNear && (now - L.burst[i] < 420);
+
+      if (hot){
+        /* 爆亮列: 雨头往上 6 个字全部提到近白, 越往上越淡 */
+        for (let k = 0; k < 6; k++){
+          ctx.setTransform(-1, 0, 0, 1, ax, y - k * L.pitch);
+          ctx.fillStyle = k === 0 ? "rgba(255,255,255,.96)"
+                                  : "rgba(226,255,238," + (0.5 - k * 0.07).toFixed(2) + ")";
+          ctx.fillText(rndGlyph(), 0, 0);
+        }
+      } else {
+        /* 只有跨到新的一格才换字: 头字固定后每帧重绘以保持明亮,
+           身后的拖尾交给底色衰减 —— 这样慢速下落也不会闪成一片噪点 */
+        if (row !== L.row[i]){
+          L.row[i] = row;
+          L.ch[i] = rndGlyph();
+          for (let k = 1; k <= L.tails; k++){
+            ctx.setTransform(-1, 0, 0, 1, ax, y - k * L.pitch);
+            ctx.fillStyle = "rgba(0,255,110," + (L.alpha * (0.62 - k * 0.18)).toFixed(2) + ")";
+            ctx.fillText(rndGlyph(), 0, 0);
+          }
+        }
+        ctx.setTransform(-1, 0, 0, 1, ax, y);
+        ctx.fillStyle = "rgba(226,255,238," + headAlpha.toFixed(2) + ")";
+        ctx.fillText(L.ch[i], 0, 0);
       }
-    } else {
-      const r = Math.random();
-      glyph(ax, y, r < 0.16 ? "#ffffff"
-                 : r < 0.42 ? "#e6fff0"
-                 : "rgba(0,255,102,.82)");
-      glyph(ax, y - baseFont, "rgba(92,255,150,.55)");
-      glyph(ax, y - baseFont * 2, "rgba(0,255,102,.32)");
-      if (Math.random() < 0.5) glyph(ax, y - baseFont * 3, "rgba(0,255,102,.18)");
-    }
 
-    near[i] += nearSpd[i] * dt;
-    if (y > H && Math.random() < 0.06) near[i] = -Math.random() * 14;
+      L.drop[i] += L.spd[i] * ramp * dt;
+      if (y > H + L.pitch * 2 && Math.random() < 0.05){
+        L.drop[i] = -Math.random() * 12;
+        L.row[i] = -1e9;
+      }
+    }
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 function startRain(){
   if (raining) return;
-  if (!near.length) resize();
+  if (!layers.length) resize();
   lastFrame = performance.now();
-  nextBurstAt = lastFrame + 700;
+  nextBurstAt = lastFrame + 900;
   raining = true;
   raf = requestAnimationFrame(frame);
 }
