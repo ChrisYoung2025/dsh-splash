@@ -16,7 +16,7 @@
 
 | 片头 | 预览 | 时长 | 说明 |
 |---|---|---|---|
-| **黑客帝国 · 数字雨** | <img src="screenshots/matrix-1.jpg" width="320"> | ~13s | 左右镜像代码雨（远近双层景深 / 整列爆亮 / 镜头缓推）→ 终端日志 → `ACCESS GRANTED` → 硬切黑场 → 片尾衬线标题卡 → 逐字飘散 |
+| **黑客帝国 · 数字雨** | <img src="screenshots/matrix-1.jpg" width="320"> | ~13s | 左右镜像代码雨（远/中/近三层视差 / 整列爆亮 / 镜头缓推）→ 终端日志 → 雨中高亮格逐格点亮成 **DEEPSEEK 鲸鱼** → `ACCESS GRANTED` → 硬切黑场（鲸鱼留作背景）→ 片尾衬线标题卡 → 逐字飘散 |
 | **550C 简易** | <img src="screenshots/550c-simple.jpg" width="320"> | ~4s | 550C logo 逐路径书写，写完即交接 |
 | **550C 完整** | <img src="screenshots/550c-full.jpg" width="320"> | ~16s | logo 之后继续跑 47 节点覆写的终端流程（含授权弹窗、链路监控等桥段） |
 | **高达动画** | <img src="screenshots/gundam.jpg" width="320"> | ~18s | 静音 H.264 视频，按比例居中，播完自动交接 |
@@ -25,7 +25,8 @@
 [片尾标题卡](screenshots/matrix-3.jpg) · [逐字飘散](screenshots/matrix-4.jpg)
 
 数字雨还带了 `prefers-reduced-motion` 适配、`?speed=2` 倍速调试、页面被遮挡时按真实时间追帧，
-以及「页面先就绪就提前收尾」的 `hurry()`。
+以及「页面先就绪就提前收尾」的 `hurry()`。鲸鱼轮廓是从 `harness-logo.png` 抠出后**位打包内嵌**的
+（128×94 位图，base64 约 2KB），运行时不加载任何图片。
 
 ## 快速开始
 

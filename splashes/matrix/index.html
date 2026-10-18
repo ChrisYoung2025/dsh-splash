@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -14,8 +14,10 @@
   视觉参考《黑客帝国动画版·虚拟程序》(Program) 片头: 满屏左右镜像的密集代码雨、
   白色雨头、纯黑底上细衬线超宽字距的标题卡、硬切黑场。
 
-  时间轴: 开机线 → 数字雨满屏 + 终端日志逐行敲出 → 故障条 + 径向闪光
-          → ACCESS GRANTED 压满屏 → 硬切黑场 → 片尾标题卡 DEEPSEEK HARNESS
+  时间轴: 开机线 → 数字雨满屏 + 终端日志逐行敲出
+          → 雨中高亮格逐格点亮, 1.8s 起、7s 成形为 DEEPSEEK 鲸鱼
+          → 故障条 + 径向闪光 → ACCESS GRANTED 压满屏
+          → 硬切黑场(雨消失, 鲸鱼留下当背景) → 片尾标题卡 DEEPSEEK HARNESS
           → 逐字飘散模糊消失 → 淡出交接。
 
   与宿主的契约(与 550c-boot.html 一致):
@@ -37,7 +39,7 @@
 <style>
   :root{
     --bg:#050403;                 /* 与 SplashHost.BootBackground 一致, 交接时不闪色 */
-    --green:#00ff66;
+    --green:#00ff41;              /* 贴原版的纯绿, 少一点青 */
     --green-bright:#d8ffe4;
   }
   *{margin:0;padding:0;box-sizing:border-box}
@@ -65,6 +67,14 @@
   }
   #rain.jit{transform:translateX(4px) skewX(-1.1deg);filter:brightness(1.3);}
 
+  /* 鲸鱼层: 和雨分开一块画布 —— 硬切黑场时雨要瞬间消失, 鲸鱼得留下来当文字背景 */
+  #whale{
+    position:fixed;inset:0;z-index:7;display:block;pointer-events:none;
+    transition:opacity .8s ease;
+  }
+  /* 切到片尾标题卡后压低一点, 免得盖过文字 */
+  body.dsh-whale-dim #whale{opacity:.7;}
+
   /* 硬切黑场: 数字雨/日志/状态行瞬间收掉, 只留黑底上的标题卡 */
   body.dsh-cut #rainWrap,body.dsh-cut #glow,body.dsh-cut #scan,body.dsh-cut #vignette,
   body.dsh-cut #sweep,body.dsh-cut #stage,body.dsh-cut #status,body.dsh-cut #enter{
@@ -80,18 +90,18 @@
   #scan{
     position:fixed;inset:0;z-index:3;pointer-events:none;opacity:.38;
     background:repeating-linear-gradient(to bottom,
-      rgba(0,255,102,.05) 0 1px,rgba(0,0,0,0) 1px 3px);
+      rgba(0,255,70,.045) 0 1px,rgba(0,0,0,0) 1px 3px);
   }
   /* 荧光: 用普通半透明径向渐变近似 screen 混合, 省掉整屏混合通道 */
   #glow{
     position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;
     background:radial-gradient(ellipse at 50% 44%,
-      rgba(0,255,120,.09) 0%,rgba(0,255,120,.05) 38%,rgba(0,0,0,0) 68%);
+      rgba(0,255,80,.09) 0%,rgba(0,255,80,.05) 38%,rgba(0,0,0,0) 68%);
   }
   #sweep{
     position:fixed;left:0;right:0;top:0;height:150px;z-index:5;pointer-events:none;opacity:0;
     background:linear-gradient(to bottom,
-      rgba(0,255,102,0),rgba(0,255,102,.07),rgba(0,255,102,0));
+      rgba(0,255,102,0),rgba(0,255,70,.06),rgba(0,255,70,0));
     animation:sweep 7s linear 1.2s infinite;
   }
   @keyframes sweep{
@@ -108,9 +118,9 @@
   }
   #log{
     width:min(720px,86vw);margin-top:4vh;text-align:left;
-    font-size:clamp(12px,1.12vw,16px);line-height:2;color:#5cffa4;
+    font-size:clamp(12px,1.12vw,16px);line-height:2;color:#46ff85;
     /* 数字雨从字缝里穿过, 用一圈柔和的暗色光晕把日志压出来(不出现方块底色) */
-    text-shadow:0 0 9px rgba(0,255,102,.55);
+    text-shadow:0 0 9px rgba(0,255,70,.5);
     box-shadow:0 0 80px 46px rgba(5,4,3,.66);
     opacity:0;transition:opacity .55s ease,transform .4s ease;
   }
@@ -135,8 +145,8 @@
     font-family:Georgia,"Times New Roman","Songti SC","SimSun",serif;
     font-size:clamp(26px,4.2vw,62px);font-weight:400;letter-spacing:.3em;
     color:#e6f6e8;white-space:nowrap;
-    text-shadow:0 0 3px rgba(210,255,220,.35),0 0 22px rgba(0,255,102,.28),
-                0 0 60px rgba(0,255,102,.16);
+    text-shadow:0 0 3px rgba(210,255,220,.35),0 0 22px rgba(0,255,72,.3),
+                0 0 60px rgba(0,255,72,.18);
     transition:opacity .3s ease;
   }
   /* 收尾: 逐字飘散 —— 每个字符一个 span, 各自带一份随机位移/旋转/模糊 */
@@ -151,8 +161,8 @@
   }
   #title.glitch{animation:titleGlitch 2.6s steps(1) infinite;}
   @keyframes titleGlitch{
-    0%,88%,100%{text-shadow:0 0 3px rgba(210,255,220,.35),0 0 22px rgba(0,255,102,.28),
-                0 0 60px rgba(0,255,102,.16);transform:none;}
+    0%,88%,100%{text-shadow:0 0 3px rgba(210,255,220,.35),0 0 22px rgba(0,255,72,.3),
+                0 0 60px rgba(0,255,72,.18);transform:none;}
     90%{text-shadow:-5px 0 rgba(190,255,220,.55),5px 0 rgba(255,0,70,.3),0 0 18px rgba(0,255,102,.5);
         transform:translateX(2px);}
     93%{text-shadow:4px 0 rgba(0,255,102,.6),-4px 0 rgba(0,255,220,.4);transform:translateX(-2px);}
@@ -172,7 +182,7 @@
   #status{
     position:fixed;left:0;right:0;bottom:26px;z-index:12;text-align:center;
     font-size:clamp(11px,1vw,13px);letter-spacing:.22em;
-    color:rgba(0,255,102,.78);text-shadow:0 0 10px rgba(0,255,102,.45);
+    color:rgba(0,255,102,.78);text-shadow:0 0 10px rgba(0,255,70,.42);
     opacity:0;transition:opacity .6s ease;pointer-events:none;
   }
   #status.show{opacity:1;}
@@ -192,7 +202,7 @@
     transform:translateY(-50%) scale(1.12);white-space:nowrap;
     font-size:clamp(20px,3.4vw,46px);letter-spacing:.62em;
     color:#eaffef;opacity:0;
-    text-shadow:0 0 18px rgba(0,255,102,.95),0 0 64px rgba(0,255,102,.6);
+    text-shadow:0 0 18px rgba(0,255,72,.95),0 0 64px rgba(0,255,72,.62);
     pointer-events:none;
     transition:opacity .3s ease,letter-spacing 1s cubic-bezier(.2,.8,.2,1),
                transform 1s cubic-bezier(.2,.8,.2,1);
@@ -219,7 +229,7 @@
   .glitch-bar{
     position:fixed;left:0;right:0;z-index:15;height:2px;pointer-events:none;opacity:0;
     background:rgba(190,255,215,.45);
-    box-shadow:0 0 14px rgba(0,255,102,.7);
+    box-shadow:0 0 14px rgba(0,255,70,.66);
   }
   .glitch-bar.on{animation:bar .5s steps(2) forwards;}
   @keyframes bar{
@@ -246,8 +256,8 @@
   }
 
   /* ---------- 交接: 全体淡到片头底色 ---------- */
-  body.dsh-fade #rainWrap,body.dsh-fade #sweep,body.dsh-fade #glow,body.dsh-fade #scan,
-  body.dsh-fade #vignette,body.dsh-fade #stage,body.dsh-fade #titleBox,
+  body.dsh-fade #rainWrap,body.dsh-fade #whale,body.dsh-fade #sweep,body.dsh-fade #glow,
+  body.dsh-fade #scan,body.dsh-fade #vignette,body.dsh-fade #stage,body.dsh-fade #titleBox,
   body.dsh-fade #status,body.dsh-fade #enter,body.dsh-fade #flash{
     opacity:0!important;transition:opacity .35s ease!important;animation:none!important;
   }
@@ -263,6 +273,7 @@
 <body>
 
 <div id="rainWrap"><canvas id="rain"></canvas></div>
+<canvas id="whale"></canvas>
 <div id="sweep"></div>
 <div id="glow"></div>
 <div id="scan"></div>
@@ -347,14 +358,36 @@ function waitOr(logicalMs, cond){
   });
 }
 
-/* ===== 数字雨(canvas, 远 / 中 / 近 三层) ===== */
+/* ===== 数字雨(canvas, 远 / 中 / 近 三层) + 鲸鱼层 ===== */
 const canvas = $("#rain");
 const ctx = canvas.getContext("2d", { alpha: false });
+const whaleCanvas = $("#whale");
+const wctx = whaleCanvas.getContext("2d");
 const BG = "#050403";
 /* 半角片假名 + 数字 + 符号: 经典 Matrix 雨点字符集 */
 const GLYPHS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789:.=+-*<>|/\\";
 const FONT = 'Consolas,"MS Gothic","Courier New",monospace';
 const rndGlyph = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+
+/* ---- 鲸鱼掩码 ----
+   由 assets/harness-logo.png 抠出的 128x94 剪影, 位打包后 base64 内嵌
+   (运行时不加载任何图片, 保持单文件)。whaleAt(u,v) 判断归一化坐标是否在轮廓内。 */
+const WHALE_PACK = "128|94|AAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAA4AAAAAAAAAAAAAAAAYAAAeAAAAAAAAAAAAAAAH/wAAHwAAAAAAAAAAAAAAP/+AAD8AAAAAAAAAAAAAAf/+AAA/AAAAAAAAAAA//4f//AAAP4AAAAAAAAAD//////gAAD/AAAAAAAAAH//////wAAA/4AAAAGAAAP//////8AAAf/wAAADwAAH///////AAAH//AAAB8AAH///////wAAB//4AAA/AAH///////8AAAf//AAA/wAD////////gAAD//4Af/8AB////////8AAA///B///AA/////////gAAP//w///wAf////////+AAD//8///4AP/////////wAA//////+AH//////////AAH//////gD//////////4AB//////wA///////////AAf/////8Af//////////4AD/////+AP///////////AA//////gD///////////4AH/////wB////////////AA/////8Af///////////4AP////+AP////////////AB/////AD////////////4AP////gB/////////////AA////wAf////////////4AH///wAP/////////////AA///wAD/////////////4AP//wAA//////////////AD//AAAP/////////////4B//AAAH/gB///////////gf/wAAB/gAB//////////+H/8AAAf4AAB//////////7//AAAH+AAAH////////////gAAD/gAAAP/////A/////4AAA/4AAAA/////gD////+AAAP+AAAAD////4Af////gAAD/gAAAAf////AD////4AAA/4AAAAB/////Af///+AAAP+AAAAAP////4D////AAAD/wAAAAB////PAf///wAAA/8AAAAAH///jwD///8AAAP/AAAAAA///88A////AAAD/wAAAAAH///PAH///gAAA/8AAAAAA////wB///4AAAP/gAAAAAH///8AP//+AAAB/4AAAAAA////AD///AAAAf+AAAAAAH///wAf//wAAAH/wAAAAAA///+AH//8AAAB/8AAAAAAP///wB//+AAAAf/AAAAAAB///+A///gAAAD/4AAAAAAP///////wAAAA/+AAAAAAB///////8AAAAP/wAAAAAAf///////AAAAD/8AAAAAAD///////gAAAAf/gAAAAAAf//////4AAAAH/4AAAAAAD//////8AAAAB//AAAAAAA///////AAAAAP/wAAAAAAH//////gAAAAD/+AAAAAAA//////wAAAAAf/gAAAAAAP/////8AAAAAH/8AAAAAAB/////+AAAAAA//gAAAAAAP/////gAAAAAP/8AAAAAAD/////wAAAAAB//gAAAAAAf////4AAAAAAf/4AAA8AAD////8AAAAAAD//AAAPwAA/////AAAAAAA//4AAD/AAH////gAAAAAAH//AAA/4AA////wAAAAAAA//4AAP/gAH///4AAAAAAAH//gAB/8AA///+AAAAAAAB//8AAf/wAH///AAAAAAAAP//gAD/+AA///wAAAAAAAB//+AA//wAH///gAAAAAAAP//wAP//AA///+AAAAAAAB///AD//4AH///8AAAAAAAP//+D///AA////wAAAAAAB///////8AH///+AAAAAAAP///////wAf///wAAAAAAB////////wD///8AAAAAAAH////////////+AAAAAAAA/////////4///AAAAAAAAD////////4AP4AAAAAAAAAf///////8AAAAAAAAAAAAB///////+AAAAAAAAAAAAAH//////+AAAAAAAAAAAAAAf/////+AAAAAAAAAAAAAAB/////+AAAAAAAAAAAAAAAD////8AAAAAAAAAAAAAAAAD///wAAAAAAAAAAA==";
+
+const WHALE = (() => {
+  const p = WHALE_PACK.split("|");
+  const raw = atob(p[2]);
+  const bits = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bits[i] = raw.charCodeAt(i);
+  return { w: parseInt(p[0], 10), h: parseInt(p[1], 10), bits };
+})();
+
+function whaleAt(u, v){
+  const mx = Math.min(WHALE.w - 1, Math.max(0, (u * WHALE.w) | 0));
+  const my = Math.min(WHALE.h - 1, Math.max(0, (v * WHALE.h) | 0));
+  const bit = my * WHALE.w + mx;
+  return (WHALE.bits[bit >> 3] & (128 >> (bit & 7))) !== 0;
+}
 
 /* 三层的"距离感": 字号 / 亮度 / 下落速度 / 拖尾长度逐层递减。
    远层最慢最暗最小、还错开半格落在近层柱缝里 —— 近层唰唰往下走, 远层只是缓缓漂,
@@ -366,9 +399,42 @@ const LAYER_DEFS = [
   { scale: 1.00, alpha: 1.00, vMin: 0.100, vMax: 0.220, offset: 0.00, tails: 2, step: 1 }
 ];
 
+/* 鲸鱼在 1.8s 开始逐格点亮, 7.0s 成形(之后一直作为背景留在标题后面) */
+const WHALE_REVEAL_FROM = 1800, WHALE_REVEAL_TO = 7000;
+const WHALE_ASPECT = 890 / 654;     /* harness-logo 里鲸鱼剪影的宽高比 */
+
 let W = 0, H = 0, dpr = 1, baseFont = 16;
 let layers = [];
+let whaleCells = [], whaleCell = 12;
 let raining = false, raf = 0, lastFrame = 0, nextBurstAt = 0;
+
+/* 把轮廓按当前的字体尺寸铺成格子: 每格一个字, 后期只按进度点亮 */
+function buildWhale(){
+  whaleCell = Math.max(7, Math.round(baseFont * 0.36));
+  const bh = Math.min(H * 0.50, (W * 0.66) / WHALE_ASPECT);
+  const bw = bh * WHALE_ASPECT;
+  const bx = (W - bw) / 2;
+  const by = H * 0.43 - bh / 2;
+
+  const cols = Math.max(1, Math.floor(bw / whaleCell));
+  const rows = Math.max(1, Math.floor(bh / whaleCell));
+  whaleCells = [];
+  for (let cy = 0; cy < rows; cy++){
+    for (let cx = 0; cx < cols; cx++){
+      const u = (cx + 0.5) / cols;
+      const v = (cy + 0.5) / rows;
+      if (!whaleAt(u, v)) continue;
+      whaleCells.push({
+        x: bx + cx * whaleCell + whaleCell * 0.5,
+        y: by + cy * whaleCell + whaleCell * 0.5,
+        ch: rndGlyph(),
+        th: Math.pow(Math.random(), 1.7),   /* 点亮阈值: 偏小, 到中后段就基本铺满 */
+        tone: Math.random(),        /* 亮度档: 少量近白当"高亮" */
+        next: 0
+      });
+    }
+  }
+}
 
 function resize(){
   dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -376,13 +442,15 @@ function resize(){
   H = Math.max(1, Math.floor(window.innerHeight * dpr));
   canvas.width = W;
   canvas.height = H;
+  whaleCanvas.width = W;
+  whaleCanvas.height = H;
 
-  /* 参考片头: 字比常见"终端雨"更大更粗, 列距紧(几乎无缝), 雨柱才连成一片 */
-  baseFont = Math.max(11, Math.round(Math.min(20, window.innerWidth / 64))) * dpr;
+  /* 字号比之前大一号(约 +20%), 更接近原版那种粗壮、能连成柱的量感 */
+  baseFont = Math.max(12, Math.round(Math.min(24, window.innerWidth / 54))) * dpr;
 
   layers = LAYER_DEFS.map(def => {
-    const font = Math.max(7, Math.round(baseFont * def.scale));
-    const pitch = Math.max(6, Math.round(font * 1.12));
+    const font = Math.max(8, Math.round(baseFont * def.scale));
+    const pitch = Math.max(7, Math.round(font * 1.12));
     const n = Math.ceil(W / pitch) + 1;
     const rows = H / pitch;
     return Object.assign({}, def, {
@@ -395,18 +463,14 @@ function resize(){
     });
   });
 
+  buildWhale();
+
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
 }
 
-function frame(now){
-  if (!raining) return;
-  raf = requestAnimationFrame(frame);
-
-  const dt = Math.max(0.4, Math.min(2.6, (now - lastFrame) / 16.667 || 1));
-  lastFrame = now;
-
+function drawRain(now, dt){
   /* 半透明底色反复覆盖 = 拖尾。拖尾长度 ≈ 下落速度 / 衰减率, 速度降到 ~1/4 后
      衰减也要跟着降(0.03), 否则每个字还没走出两格就被擦掉, 只剩一地散点 */
   ctx.fillStyle = "rgba(5,4,3,0.035)";
@@ -444,7 +508,7 @@ function frame(now){
         for (let k = 0; k < 6; k++){
           ctx.setTransform(-1, 0, 0, 1, ax, y - k * L.pitch);
           ctx.fillStyle = k === 0 ? "rgba(255,255,255,.96)"
-                                  : "rgba(226,255,238," + (0.5 - k * 0.07).toFixed(2) + ")";
+                                  : "rgba(220,255,232," + (0.5 - k * 0.07).toFixed(2) + ")";
           ctx.fillText(rndGlyph(), 0, 0);
         }
       } else {
@@ -455,12 +519,12 @@ function frame(now){
           L.ch[i] = rndGlyph();
           for (let k = 1; k <= L.tails; k++){
             ctx.setTransform(-1, 0, 0, 1, ax, y - k * L.pitch);
-            ctx.fillStyle = "rgba(0,255,110," + (L.alpha * (0.62 - k * 0.18)).toFixed(2) + ")";
+            ctx.fillStyle = "rgba(0,255,72," + (L.alpha * (0.62 - k * 0.18)).toFixed(2) + ")";
             ctx.fillText(rndGlyph(), 0, 0);
           }
         }
         ctx.setTransform(-1, 0, 0, 1, ax, y);
-        ctx.fillStyle = "rgba(226,255,238," + headAlpha.toFixed(2) + ")";
+        ctx.fillStyle = "rgba(216,255,226," + headAlpha.toFixed(2) + ")";
         ctx.fillText(L.ch[i], 0, 0);
       }
 
@@ -474,19 +538,60 @@ function frame(now){
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
+/* 鲸鱼: 只画"已点亮"的格子, 进度由 elapsed() 决定; 每帧清空后重绘, 因此能独立于雨存在 */
+function drawWhale(now, force){
+  if (!whaleCells.length) return;
+  wctx.clearRect(0, 0, W, H);
+
+  const p = force ? 1 : Math.max(0, Math.min(1,
+    (elapsed() - WHALE_REVEAL_FROM) / (WHALE_REVEAL_TO - WHALE_REVEAL_FROM)));
+
+  wctx.font = whaleCell + "px " + FONT;
+  wctx.textBaseline = "top";
+
+  for (let i = 0; i < whaleCells.length; i++){
+    const c = whaleCells[i];
+    const a = Math.min(1, (p - c.th) * 6);     /* 每格到自己的阈值就亮, 带一点淡入 */
+    if (a <= 0.02) continue;
+
+    if (now > c.next){ c.ch = rndGlyph(); c.next = now + 900 + Math.random() * 2800; }
+
+    /* 轻微呼吸/抖动, 免得整片鲸鱼是一张静止的图 */
+    const breathe = 0.86 + 0.14 * Math.sin(now * 0.0016 + i * 1.7);
+    const alpha = (a * breathe * (c.tone < 0.15 ? 1 : c.tone < 0.45 ? 0.85 : 0.62)).toFixed(2);
+    wctx.setTransform(-1, 0, 0, 1, c.x + whaleCell * 0.47, c.y);
+    wctx.fillStyle = c.tone < 0.15 ? "rgba(244,255,248," + alpha + ")"
+                    : c.tone < 0.45 ? "rgba(170,255,200," + alpha + ")"
+                    : "rgba(0,255,72," + alpha + ")";
+    wctx.fillText(c.ch, 0, 0);
+  }
+  wctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+/* 唯一的主循环: 雨停了也继续跑, 因为鲸鱼要留在标题后面继续闪 */
+function tick(now){
+  if (finished) return;
+  raf = requestAnimationFrame(tick);
+
+  const dt = Math.max(0.4, Math.min(2.6, (now - lastFrame) / 16.667 || 1));
+  lastFrame = now;
+
+  if (raining) drawRain(now, dt);
+  if (!REDUCED) drawWhale(now);
+}
+
 function startRain(){
   if (raining) return;
   if (!layers.length) resize();
   lastFrame = performance.now();
   nextBurstAt = lastFrame + 900;
   raining = true;
-  raf = requestAnimationFrame(frame);
+  raf = requestAnimationFrame(tick);
 }
 
-/* 硬切黑场: 停帧 + 立刻清屏 */
+/* 硬切黑场: 雨瞬间清掉, 但主循环继续(鲸鱼还要留在标题后面) */
 function stopRain(){
   raining = false;
-  if (raf){ cancelAnimationFrame(raf); raf = 0; }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
@@ -613,8 +718,14 @@ async function playMatrix(){
   if (launched || finished) return;
   launched = true;
 
-  document.body.classList.add("dsh-rain");
-  if (!REDUCED) startRain();
+  if (REDUCED){
+    /* 减少动效: 不跑雨, 鲸鱼直接以成形状态静态呈现 */
+    resize();
+    drawWhale(performance.now(), true);
+  } else {
+    document.body.classList.add("dsh-rain");
+    startRain();
+  }
 
   const power = $("#powerline");
   power.classList.add("on");
@@ -659,7 +770,7 @@ async function playMatrix(){
   if (cancelled) return;
 
   /* ===== 硬切黑场 → 片尾标题卡 ===== */
-  document.body.classList.add("dsh-cut");
+  document.body.classList.add("dsh-cut", "dsh-whale-dim");
   document.body.classList.remove("dsh-rain");
   stopRain();
 
@@ -717,7 +828,7 @@ window.dsh550c = {
 /* 播放期间点击画面 / 按 Esc 跳过 */
 document.addEventListener("click", () => { if (launched && !finished) finish(false); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") finish(false); });
-window.addEventListener("resize", () => { if (raining) resize(); });
+window.addEventListener("resize", () => { if (!finished) resize(); });
 
 renderStatus();
 
